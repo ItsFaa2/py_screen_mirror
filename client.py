@@ -11,6 +11,7 @@ Kontrol:
   - Gerak + klik mouse di gambar = gerak + klik di target
   - Scroll mouse = scroll di target
   - Ketik keyboard saat jendela gambar fokus = mengetik di target
+  - Copy-paste teks dua arah: copy di salah satu PC, paste di satunya
 """
 import socket
 import struct
@@ -22,8 +23,16 @@ import tkinter as tk
 
 from PIL import Image, ImageTk
 
+try:
+    import pyperclip
+    HAVE_CLIPBOARD = True
+except ImportError:
+    pyperclip = None
+    HAVE_CLIPBOARD = False
+
 VIDEO_PORT = 5000
 CONTROL_PORT = 5001
+CLIP_MAX = 100_000
 
 
 def recvall(sock, n):
@@ -68,8 +77,20 @@ class MirrorClient:
 
         self.latest_img = None
         self.lock = threading.Lock()
+        self.send_lock = threading.Lock()
         self.running = True
         self.last_move = 0
+
+        # baseline clipboard biar isi lama tidak langsung terkirim pas connect
+        self.clip_last_sent = None
+        self.clip_last_recv = None
+        if HAVE_CLIPBOARD:
+            try:
+                self.clip_last_sent = pyperclip.paste()
+            except Exception:
+                pass
+        else:
+            print("[CLIPBOARD] pyperclip tidak ada, sync copy-paste nonaktif.")
 
         # --- GUI ---
         self.root = tk.Tk()
@@ -99,13 +120,70 @@ class MirrorClient:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
         threading.Thread(target=self.video_loop, daemon=True).start()
+        threading.Thread(target=self.control_reader, daemon=True).start()
+        threading.Thread(target=self.clipboard_poller, daemon=True).start()
         self.root.after(30, self.refresh_gui)
 
     def send(self, msg):
         try:
-            self.csock.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+            with self.send_lock:
+                self.csock.sendall((json.dumps(msg) + "\n").encode("utf-8"))
         except Exception as e:
             print(f"[CLIENT] kirim gagal: {e}")
+
+    def control_reader(self):
+        """Baca pesan dari target (clipboard target -> clipboard client)."""
+        buf = b""
+        try:
+            while self.running:
+                chunk = self.csock.recv(4096)
+                if not chunk:
+                    print("[CLIENT] koneksi kontrol putus")
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line.decode("utf-8", "ignore"))
+                    except Exception:
+                        continue
+                    if msg.get("t") == "clipboard" and HAVE_CLIPBOARD:
+                        text = str(msg.get("text", ""))
+                        if len(text) > CLIP_MAX:
+                            continue
+                        self.clip_last_recv = text
+                        try:
+                            pyperclip.copy(text)
+                            print(f"[CLIPBOARD] terima {len(text)} char dari target")
+                        except Exception as e:
+                            print(f"[CLIPBOARD] copy gagal: {e}")
+        except Exception:
+            pass
+        finally:
+            self.running = False
+
+    def clipboard_poller(self):
+        """Kirim clipboard client ke target kalau berubah."""
+        if not HAVE_CLIPBOARD:
+            return
+        while self.running:
+            time.sleep(1.0)
+            try:
+                cur = pyperclip.paste()
+            except Exception:
+                continue
+            if not isinstance(cur, str):
+                continue
+            if cur == self.clip_last_sent or cur == self.clip_last_recv:
+                continue
+            if len(cur) > CLIP_MAX:
+                self.clip_last_sent = cur
+                continue
+            self.send({"t": "clipboard", "text": cur})
+            self.clip_last_sent = cur
+            print(f"[CLIPBOARD] kirim {len(cur)} char ke target")
 
     def rel_pos(self, event):
         w = self.label.winfo_width() or 1

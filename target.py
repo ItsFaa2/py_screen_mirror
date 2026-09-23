@@ -11,6 +11,7 @@ Cara pakai:
 Port:
   5000 = video (target -> client)
   5001 = kontrol mouse/keyboard (client -> target)
+       + clipboard teks dua arah (copy di satu PC, paste di satunya)
 """
 import socket
 import struct
@@ -23,13 +24,28 @@ import mss
 from PIL import Image
 import pyautogui
 
+try:
+    import pyperclip
+    HAVE_CLIPBOARD = True
+except ImportError:
+    pyperclip = None
+    HAVE_CLIPBOARD = False
+    print("[CLIPBOARD] pyperclip tidak ada, sync copy-paste nonaktif.")
+
 VIDEO_PORT = 5000
 CONTROL_PORT = 5001
 FPS = 15
 JPEG_QUALITY = 60
 MAX_WIDTH = 1280  # resize agar ringan di WiFi
+CLIP_MAX = 100_000  # teks > ini tidak disync
 
 pyautogui.FAILSAFE = False
+
+# koneksi kontrol aktif (buat kirim clipboard target -> client)
+_clip_conn = None
+_clip_lock = threading.Lock()
+_clip_last_sent = None
+_clip_last_recv = None
 
 
 def get_lan_ip():
@@ -132,6 +148,55 @@ def do_control(msg):
         except Exception as e:
             print(f"[CONTROL] key gagal '{key}': {e}")
 
+    elif t == "clipboard":
+        # teks copy dari client -> tempel ke clipboard target
+        global _clip_last_recv
+        text = str(msg.get("text", ""))
+        if len(text) > CLIP_MAX:
+            print("[CLIPBOARD] teks dari client kebesaran, skip")
+            return
+        _clip_last_recv = text
+        if HAVE_CLIPBOARD:
+            try:
+                pyperclip.copy(text)
+                print(f"[CLIPBOARD] terima {len(text)} char dari client")
+            except Exception as e:
+                print(f"[CLIPBOARD] copy gagal: {e}")
+
+
+def clipboard_poller():
+    """Cek clipboard target tiap 1 detik, kirim ke client kalau berubah."""
+    global _clip_last_sent
+    if not HAVE_CLIPBOARD:
+        return
+    try:
+        _clip_last_sent = pyperclip.paste()
+    except Exception:
+        _clip_last_sent = None
+    while True:
+        time.sleep(1.0)
+        conn = _clip_conn
+        if conn is None:
+            continue
+        try:
+            cur = pyperclip.paste()
+        except Exception:
+            continue
+        if not isinstance(cur, str):
+            continue
+        if cur == _clip_last_sent or cur == _clip_last_recv:
+            continue
+        if len(cur) > CLIP_MAX:
+            _clip_last_sent = cur  # jangan spam, anggap sudah diproses
+            continue
+        try:
+            with _clip_lock:
+                conn.sendall((json.dumps({"t": "clipboard", "text": cur}) + "\n").encode("utf-8"))
+            _clip_last_sent = cur
+            print(f"[CLIPBOARD] kirim {len(cur)} char ke client")
+        except Exception:
+            pass  # koneksi putus, poller coba lagi nanti
+
 
 def control_server():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -143,6 +208,8 @@ def control_server():
     while True:
         conn, addr = srv.accept()
         print(f"[CONTROL] client connect: {addr}")
+        global _clip_conn
+        _clip_conn = conn
         buf = b""
         try:
             while True:
@@ -162,6 +229,8 @@ def control_server():
             print(f"[CONTROL] error: {e}")
         finally:
             print("[CONTROL] client disconnect")
+            if _clip_conn is conn:
+                _clip_conn = None
             try:
                 conn.close()
             except Exception:
@@ -175,6 +244,7 @@ if __name__ == "__main__":
     print("Tekan Ctrl+C untuk berhenti.\n")
     threading.Thread(target=video_server, daemon=True).start()
     threading.Thread(target=control_server, daemon=True).start()
+    threading.Thread(target=clipboard_poller, daemon=True).start()
     try:
         while True:
             time.sleep(1)

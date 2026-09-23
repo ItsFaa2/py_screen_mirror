@@ -25,4 +25,6 @@ python client.py
 ```
 Masukkan IP target itu.
 
-Port: `5000` video, `5001` kontrol mouse/keyboard.
+Port: `5000` video, `5001` kontrol mouse/keyboard + clipboard teks dua arah.
+
+Copy-paste: copy teks di salah satu PC, otomatis kesync — tinggal paste (Ctrl+V) di PC satunya. Khusus teks, maksimal ~100 KB.
