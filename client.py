@@ -36,6 +36,19 @@ CONTROL_PORT = 5001
 CLIP_MAX = 100_000
 
 
+def map_to_relative(ex, ey, label_w, label_h, img_w, img_h):
+    """Petakan posisi mouse di label ke koordinat relatif 0..1 di gambar.
+    Gambar di-tampilkan thumbnail (letterbox, center), jadi harus
+    dikurangi offset sisi yang kosong."""
+    if not img_w or not img_h:
+        img_w, img_h = label_w, label_h
+    ox = (label_w - img_w) / 2
+    oy = (label_h - img_h) / 2
+    rx = (ex - ox) / img_w
+    ry = (ey - oy) / img_h
+    return max(0.0, min(1.0, rx)), max(0.0, min(1.0, ry))
+
+
 def recvall(sock, n):
     data = b""
     while len(data) < n:
@@ -115,14 +128,16 @@ class MirrorClient:
         self.label = tk.Label(self.root, bg="black")
         self.label.pack(fill=tk.BOTH, expand=True)
         self.photo = None
+        self.disp_w = None  # ukuran gambar yg tampil (habis thumbnail)
+        self.disp_h = None
 
-        # mouse
+        # mouse (klik selalu bawa posisi biar tidak ketinggalan kursor)
         self.label.bind("<Motion>", self.on_move)
-        self.label.bind("<ButtonPress-1>", lambda e: self.send_click("left", True))
+        self.label.bind("<ButtonPress-1>", lambda e: self.on_press("left", e))
         self.label.bind("<ButtonRelease-1>", lambda e: self.send_click("left", False))
-        self.label.bind("<ButtonPress-3>", lambda e: self.send_click("right", True))
+        self.label.bind("<ButtonPress-3>", lambda e: self.on_press("right", e))
         self.label.bind("<ButtonRelease-3>", lambda e: self.send_click("right", False))
-        self.label.bind("<ButtonPress-2>", lambda e: self.send_click("middle", True))
+        self.label.bind("<ButtonPress-2>", lambda e: self.on_press("middle", e))
         self.label.bind("<ButtonRelease-2>", lambda e: self.send_click("middle", False))
         # scroll: Windows/Mac
         self.label.bind("<MouseWheel>", lambda e: self.send({"t": "scroll", "dy": int(e.delta / 120) * 120}))
@@ -205,15 +220,22 @@ class MirrorClient:
     def rel_pos(self, event):
         w = self.label.winfo_width() or 1
         h = self.label.winfo_height() or 1
-        return max(0.0, min(1.0, event.x / w)), max(0.0, min(1.0, event.y / h))
+        return map_to_relative(event.x, event.y, w, h, self.disp_w, self.disp_h)
 
     def on_move(self, event):
         now = time.time()
-        if now - self.last_move < 0.03:  # throttle biar tidak banjir
+        if now - self.last_move < 0.02:  # ~50 update/detik
             return
         self.last_move = now
         x, y = self.rel_pos(event)
         self.send({"t": "move", "x": x, "y": y})
+
+    def on_press(self, button, event):
+        # kirim posisi dulu baru klik (biar klik pas di titik tekan)
+        x, y = self.rel_pos(event)
+        self.send({"t": "move", "x": x, "y": y})
+        self.send({"t": "click", "button": button, "pressed": True})
+        self.last_move = time.time()
 
     def send_click(self, button, pressed):
         self.send({"t": "click", "button": button, "pressed": pressed})
@@ -304,6 +326,7 @@ class MirrorClient:
             if w > 50 and h > 50:
                 img2 = img.copy()
                 img2.thumbnail((w, h))
+                self.disp_w, self.disp_h = img2.size  # buat mapping mouse
                 self.photo = ImageTk.PhotoImage(img2)
                 self.label.config(image=self.photo)
         self.root.after(30, self.refresh_gui)
