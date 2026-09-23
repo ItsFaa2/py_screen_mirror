@@ -12,6 +12,7 @@ Kontrol:
   - Scroll mouse = scroll di target
   - Ketik keyboard saat jendela gambar fokus = mengetik di target
   - Copy-paste teks dua arah: copy di salah satu PC, paste di satunya
+  - Menu Aksi = Copy/Paste + Fullscreen (F11, Esc buat keluar)
 """
 import socket
 import struct
@@ -94,17 +95,22 @@ class MirrorClient:
 
         # --- GUI ---
         self.root = tk.Tk()
-        self.root.title(f"Mirror - {host} (klik gambar untuk kontrol)")
+        self.base_title = f"Mirror - {host} (klik gambar untuk kontrol)"
+        self.root.title(self.base_title)
 
-        # toolbar copy/paste (buat yang Ctrl+C/V-nya rewel)
-        bar = tk.Frame(self.root)
-        bar.pack(fill=tk.X)
-        tk.Button(bar, text="Copy dari target",
-                  command=self.on_copy_btn).pack(side=tk.LEFT, padx=4, pady=4)
-        tk.Button(bar, text="Paste ke target",
-                  command=self.on_paste_btn).pack(side=tk.LEFT, padx=4, pady=4)
-        self.status = tk.Label(bar, text="siap", fg="gray")
-        self.status.pack(side=tk.RIGHT, padx=6)
+        # menu tipis (biar area gambar full, tanpa toolbar)
+        menubar = tk.Menu(self.root)
+        aksi = tk.Menu(menubar, tearoff=0)
+        aksi.add_command(label="Copy dari target", command=self.on_copy_btn)
+        aksi.add_command(label="Paste ke target", command=self.on_paste_btn)
+        aksi.add_separator()
+        aksi.add_command(label="Fullscreen (F11)", command=self.toggle_fullscreen)
+        aksi.add_command(label="Keluar", command=self.close)
+        menubar.add_cascade(label="Aksi", menu=aksi)
+        self.root.config(menu=menubar)
+        self.root.bind("<F11>", lambda e: self.toggle_fullscreen())
+        self.root.bind("<Escape>", lambda e: self.set_fullscreen(False))
+        self.is_fullscreen = False
 
         self.label = tk.Label(self.root, bg="black")
         self.label.pack(fill=tk.BOTH, expand=True)
@@ -218,9 +224,19 @@ class MirrorClient:
 
     def set_status(self, text):
         try:
-            self.status.config(text=text)
+            self.root.title(f"{self.base_title} — {text}")
         except Exception:
             pass
+
+    def set_fullscreen(self, on):
+        self.is_fullscreen = on
+        try:
+            self.root.attributes("-fullscreen", on)
+        except Exception:
+            pass
+
+    def toggle_fullscreen(self):
+        self.set_fullscreen(not self.is_fullscreen)
 
     def on_copy_btn(self):
         """Pencet Ctrl+C di target (block teks dulu di sana),
