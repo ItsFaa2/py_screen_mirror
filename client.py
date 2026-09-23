@@ -40,9 +40,30 @@ class MirrorClient:
     def __init__(self, host):
         self.host = host
         self.vsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.vsock.connect((host, VIDEO_PORT))
+        self.vsock.settimeout(5)
+        try:
+            self.vsock.connect((host, VIDEO_PORT))
+        except socket.gaierror:
+            raise SystemExit(
+                f"[CLIENT] '{host}' bukan IP/hostname yang valid.\n"
+                "Contoh yang benar: 192.168.1.5 (lihat angka IP di target.py,\n"
+                "BUKAN 5000/5001 karena itu nomor port)."
+            )
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            raise SystemExit(
+                f"[CLIENT] tidak bisa connect ke {host}:{VIDEO_PORT} ({e}).\n"
+                "- Pastikan target.py SUDAH jalan di PC satunya\n"
+                "- Satu WiFi, firewall allow Python, port 5000/5001 terbuka"
+            )
+        self.vsock.settimeout(None)
         self.csock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.csock.connect((host, CONTROL_PORT))
+        self.csock.settimeout(5)
+        try:
+            self.csock.connect((host, CONTROL_PORT))
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            self.vsock.close()
+            raise SystemExit(f"[CLIENT] port kontrol {CONTROL_PORT} gagal ({e}).")
+        self.csock.settimeout(None)
         print(f"[CLIENT] connect ke {host} OK")
 
         self.latest_img = None
@@ -165,10 +186,24 @@ class MirrorClient:
 
 
 if __name__ == "__main__":
+    import re
     print("=== CLIENT (yang mengontrol) ===")
-    host = input("IP target (lihat di target.py): ").strip()
-    if not host:
-        print("IP kosong, batal.")
-        raise SystemExit(1)
+    print("PENTING: yang dimasukkan = IP target, contoh 192.168.1.5")
+    print("(lihat tulisan 'IP PC ini:' di target.py. BUKAN 5000/5001.)")
+    print("Tes di 1 PC yang sama? pakai: 127.0.0.1\n")
+    while True:
+        host = input("IP target: ").strip()
+        if not host:
+            print("IP kosong, coba lagi.")
+            continue
+        if re.fullmatch(r"\d{1,5}", host):
+            print(f"'{host}' itu nomor port, bukan IP. Masukkan IP kayak 192.168.1.5")
+            continue
+        try:
+            socket.getaddrinfo(host, VIDEO_PORT)
+        except socket.gaierror:
+            print(f"'{host}' tidak dikenal. Contoh valid: 192.168.1.5")
+            continue
+        break
     app = MirrorClient(host)
     app.run()
