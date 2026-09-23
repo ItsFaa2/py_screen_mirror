@@ -108,8 +108,27 @@ def video_server():
 
 def _norm_key(key):
     """Normalisasi nama tombol Tkinter -> nama pyautogui.
-    Contoh: 'Control_L' -> 'ctrl', 'Return' -> 'enter', 'a' -> 'a'."""
+    Contoh: 'Control_L' -> 'ctrl', 'Return' -> 'enter', 'a' -> 'a'.
+
+    Penting: simbol yang diketik pakai Shift datang sebagai keysym
+    X11 (mis. Shift+2 -> 'at'), jadi harus dipetakan ke karakternya
+    dulu, kalau tidak pyautogui tidak kenal dan simbol gagal ketik.
+    """
     k = str(key).lower()
+    keysym_to_char = {
+        "space": " ", "exclam": "!", "quotedbl": '"', "numbersign": "#",
+        "dollar": "$", "percent": "%", "ampersand": "&", "apostrophe": "'",
+        "parenleft": "(", "parenright": ")", "asterisk": "*",
+        "plus": "+", "comma": ",", "minus": "-", "period": ".",
+        "slash": "/", "colon": ":", "semicolon": ";", "less": "<",
+        "equal": "=", "greater": ">", "question": "?", "at": "@",
+        "bracketleft": "[", "backslash": "\\", "bracketright": "]",
+        "asciicircum": "^", "underscore": "_", "grave": "`",
+        "braceleft": "{", "bar": "|", "braceright": "}",
+        "asciitilde": "~",
+    }
+    if k in keysym_to_char:
+        return keysym_to_char[k]
     for suffix in ("_l", "_r"):
         if k.endswith(suffix):
             k = k[: -len(suffix)]
