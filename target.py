@@ -71,7 +71,7 @@ def video_server():
         conn, addr = srv.accept()
         print(f"[VIDEO] client connect: {addr}")
         try:
-            with mss.mss() as sct:
+            with mss.MSS() as sct:
                 monitor = sct.monitors[1]  # layar utama
                 delay = 1.0 / FPS
                 while True:
