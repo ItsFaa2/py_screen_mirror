@@ -106,6 +106,31 @@ def video_server():
                 pass
 
 
+def _norm_key(key):
+    """Normalisasi nama tombol Tkinter -> nama pyautogui.
+    Contoh: 'Control_L' -> 'ctrl', 'Return' -> 'enter', 'a' -> 'a'."""
+    k = str(key).lower()
+    for suffix in ("_l", "_r"):
+        if k.endswith(suffix):
+            k = k[: -len(suffix)]
+    alias = {
+        "space": "space", "enter": "enter", "return": "enter",
+        "backspace": "backspace", "tab": "tab", "escape": "esc",
+        "esc": "esc", "shift": "shift", "ctrl": "ctrl",
+        "control": "ctrl", "alt": "alt", "up": "up",
+        "down": "down", "left": "left", "right": "right",
+        "delete": "delete", "home": "home", "end": "end",
+        "prior": "pgup", "next": "pgdn", "page_up": "pgup",
+        "page_down": "pgdn", "caps_lock": "capslock",
+        "win": "win", "super": "win", "menu": "apps",
+        "insert": "insert", "pause": "pause",
+        "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
+        "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
+        "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
+    }
+    return alias.get(k, k if len(k) > 1 else str(key))
+
+
 def do_control(msg):
     """Eksekusi perintah kontrol dari client. x,y = relatif 0..1"""
     screen_w, screen_h = pyautogui.size()
@@ -130,16 +155,7 @@ def do_control(msg):
     elif t == "key":
         key = str(msg.get("key", ""))
         pressed = msg.get("pressed", True)
-        # mapping nama umum -> nama pyautogui
-        alias = {
-            "space": "space", "enter": "enter", "return": "enter",
-            "backspace": "backspace", "tab": "tab", "escape": "esc",
-            "esc": "esc", "shift": "shift", "ctrl": "ctrl",
-            "control": "ctrl", "alt": "alt", "up": "up",
-            "down": "down", "left": "left", "right": "right",
-            "delete": "delete",
-        }
-        k = alias.get(key.lower(), key.lower() if len(key) > 1 else key)
+        k = _norm_key(key)
         try:
             if pressed:
                 pyautogui.keyDown(k)
@@ -147,6 +163,15 @@ def do_control(msg):
                 pyautogui.keyUp(k)
         except Exception as e:
             print(f"[CONTROL] key gagal '{key}': {e}")
+
+    elif t == "hotkey":
+        # combo langsung, misal ["ctrl","c"] (dipakai tombol Copy/Paste)
+        keys = [str(k) for k in msg.get("keys", [])][:4]
+        try:
+            pyautogui.hotkey(*keys)
+            print(f"[CONTROL] hotkey {'+'.join(keys)}")
+        except Exception as e:
+            print(f"[CONTROL] hotkey gagal {keys}: {e}")
 
     elif t == "clipboard":
         # teks copy dari client -> tempel ke clipboard target

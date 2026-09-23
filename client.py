@@ -95,6 +95,17 @@ class MirrorClient:
         # --- GUI ---
         self.root = tk.Tk()
         self.root.title(f"Mirror - {host} (klik gambar untuk kontrol)")
+
+        # toolbar copy/paste (buat yang Ctrl+C/V-nya rewel)
+        bar = tk.Frame(self.root)
+        bar.pack(fill=tk.X)
+        tk.Button(bar, text="Copy dari target",
+                  command=self.on_copy_btn).pack(side=tk.LEFT, padx=4, pady=4)
+        tk.Button(bar, text="Paste ke target",
+                  command=self.on_paste_btn).pack(side=tk.LEFT, padx=4, pady=4)
+        self.status = tk.Label(bar, text="siap", fg="gray")
+        self.status.pack(side=tk.RIGHT, padx=6)
+
         self.label = tk.Label(self.root, bg="black")
         self.label.pack(fill=tk.BOTH, expand=True)
         self.photo = None
@@ -202,8 +213,45 @@ class MirrorClient:
         self.send({"t": "click", "button": button, "pressed": pressed})
 
     def on_key(self, event, pressed):
-        # keysym Tkinter mis: 'a', 'space', 'Return', 'BackSpace'...
+        # keysym Tkinter mis: 'a', 'space', 'Return', 'Control_L'...
         self.send({"t": "key", "key": event.keysym, "pressed": pressed})
+
+    def set_status(self, text):
+        try:
+            self.status.config(text=text)
+        except Exception:
+            pass
+
+    def on_copy_btn(self):
+        """Pencet Ctrl+C di target (block teks dulu di sana),
+        hasilnya kesync otomatis ke clipboard PC ini."""
+        self.send({"t": "hotkey", "keys": ["ctrl", "c"]})
+        self.set_status("copy dikirim, tunggu ~1 detik lalu paste lokal")
+        print("[CLIENT] tombol copy: ctrl+c dikirim ke target")
+        self.label.focus_set()
+
+    def on_paste_btn(self):
+        """Kirim isi clipboard PC ini ke target lalu pencet Ctrl+V di sana."""
+        if not HAVE_CLIPBOARD:
+            self.set_status("pyperclip tidak ada")
+            return
+        try:
+            text = pyperclip.paste()
+        except Exception as e:
+            self.set_status(f"clipboard gagal: {e}")
+            return
+        if not isinstance(text, str) or not text:
+            self.set_status("clipboard kosong")
+            return
+        if len(text) > CLIP_MAX:
+            self.set_status("teks kebesaran (>100KB)")
+            return
+        self.clip_last_sent = text  # biar poller tidak kirim dobel
+        self.send({"t": "clipboard", "text": text})
+        self.send({"t": "hotkey", "keys": ["ctrl", "v"]})
+        self.set_status(f"paste {len(text)} char ke target")
+        print(f"[CLIENT] tombol paste: {len(text)} char + ctrl+v ke target")
+        self.label.focus_set()
 
     def video_loop(self):
         try:
